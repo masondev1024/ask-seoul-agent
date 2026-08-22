@@ -12,7 +12,7 @@ def test_eval_manifest_is_versioned_strict_and_contains_30_unique_cases() -> Non
     manifest = load_eval_manifest(MANIFEST_PATH)
 
     assert manifest.schema_version == 1
-    assert manifest.dataset_version == "2026-08-22.3"
+    assert manifest.dataset_version == "2026-08-23.1"
     assert len(manifest.cases) == 30
     assert len({case.case_id for case in manifest.cases}) == 30
     assert {case.case_type for case in manifest.cases} == {"golden", "red_team"}

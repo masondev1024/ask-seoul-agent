@@ -8,6 +8,8 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .weather_catalog import WeatherProductId, is_weather_product_id
+
 PRODUCT_ID_PATTERN = r"^[A-Za-z][A-Za-z0-9_]{0,127}$"
 _PRODUCT_ID_RE = re.compile(PRODUCT_ID_PATTERN)
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -56,8 +58,8 @@ class ToolCall(StrictModel):
     def validate_known_argument_shape(self) -> Self:
         if self.name == "preview_product":
             product_id = self.arguments.get("product_id")
-            if not isinstance(product_id, str) or not _PRODUCT_ID_RE.fullmatch(product_id):
-                raise ValueError("preview_product requires a safe product_id")
+            if not is_weather_product_id(product_id):
+                raise ValueError("preview_product requires an allowed weather product_id")
         elif self.name == "search_products":
             query = self.arguments.get("query")
             if not isinstance(query, str) or not 1 <= len(query.strip()) <= 200:
@@ -91,7 +93,7 @@ class EvidenceStatus(StrEnum):
 
 class Evidence(StrictModel):
     tool: Literal["preview_product"] = "preview_product"
-    product_id: str
+    product_id: WeatherProductId
     source: str
     request_id: str | None = None
     freshness: str | None = None
@@ -102,7 +104,7 @@ class Evidence(StrictModel):
 
 _NO_EVIDENCE_ANSWER = (
     "근거 데이터를 확보하지 못해 답변을 생성하지 않았습니다. "
-    "질문을 더 구체적으로 바꾸거나 ASK Seoul 데이터 제품 상태를 확인해 주세요."
+    "질문을 더 구체적으로 바꾸거나 ASK Seoul 기상 제품 상태를 확인해 주세요."
 )
 _PREVIEW_DISCLAIMER = (
     "주의: 아래 답변은 ASK Seoul의 공개 5행 미리보기 샘플만 근거로 하며, "
@@ -161,7 +163,7 @@ def _evidence_from(result: ToolResult) -> Evidence | None:
         return None
     product_id = result.content.get("product_id")
     rows = result.content.get("rows")
-    if not isinstance(product_id, str) or not _PRODUCT_ID_RE.fullmatch(product_id):
+    if not is_weather_product_id(product_id):
         return None
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
         return None

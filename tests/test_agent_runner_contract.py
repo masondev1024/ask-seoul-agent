@@ -8,9 +8,11 @@ class ScriptedProvider:
     def __init__(self, turns):
         self.turns = list(turns)
         self.messages = []
+        self.tool_names = []
 
     async def complete(self, messages, tools, *, timeout_s):
         self.messages.append(messages)
+        self.tool_names.append([tool["name"] for tool in tools])
         if not self.turns:
             raise AssertionError("provider called more times than scripted")
         return self.turns.pop(0)
@@ -85,6 +87,136 @@ async def test_demo_two_tool_happy_path_returns_preview_grounded_final(
 
 
 @pytest.mark.anyio
+async def test_runner_exposes_only_the_tool_valid_for_each_request_stage(
+    product_candidate, preview_payload
+) -> None:
+    from ask_seoul_agent.agent import AgentRunner
+    from ask_seoul_agent.models import ModelTurn, ToolCall
+    from ask_seoul_agent.tools import ToolRegistry
+
+    provider = ScriptedProvider(
+        [
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="call_search",
+                        name="search_products",
+                        arguments={"query": "weather risk"},
+                    )
+                ]
+            ),
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="call_preview",
+                        name="preview_product",
+                        arguments={"product_id": PRODUCT_ID},
+                    )
+                ]
+            ),
+            ModelTurn(text="근거 기반 요약", tool_calls=[]),
+        ]
+    )
+    runner = AgentRunner(
+        provider=provider,
+        tools=ToolRegistry(
+            ask_seoul=FakeAskSeoulClient(
+                product=product_candidate,
+                preview=preview_payload,
+            )
+        ),
+        provider_name="gemini",
+    )
+
+    events = [event async for event in runner.stream("서울 기상 위험", trace_id="trace-1")]
+
+    assert provider.tool_names == [
+        ["search_products"],
+        ["preview_product"],
+        [],
+    ]
+    assert not any(event["event"] == "session.error" for event in events)
+
+
+@pytest.mark.anyio
+async def test_runner_exposes_no_preview_tool_after_empty_search() -> None:
+    from ask_seoul_agent.agent import AgentRunner
+    from ask_seoul_agent.models import ModelTurn, ToolCall
+    from ask_seoul_agent.tools import ToolRegistry
+
+    provider = ScriptedProvider(
+        [
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="call_search",
+                        name="search_products",
+                        arguments={"query": "weather risk"},
+                    )
+                ]
+            ),
+            ModelTurn(text="근거가 부족합니다.", tool_calls=[]),
+        ]
+    )
+    runner = AgentRunner(
+        provider=provider,
+        tools=ToolRegistry(ask_seoul=FakeAskSeoulClient()),
+        provider_name="gemini",
+    )
+
+    events = [event async for event in runner.stream("서울 기상 위험", trace_id="trace-1")]
+
+    assert provider.tool_names == [["search_products"], []]
+    assert not any(event["event"] == "session.error" for event in events)
+
+
+@pytest.mark.anyio
+async def test_runner_rejects_tool_call_not_allowed_in_current_stage(
+    product_candidate,
+) -> None:
+    from ask_seoul_agent.agent import AgentRunner
+    from ask_seoul_agent.models import ModelTurn, ToolCall
+    from ask_seoul_agent.tools import ToolRegistry
+
+    provider = ScriptedProvider(
+        [
+            ModelTurn(
+                tool_calls=[
+                    ToolCall(
+                        id="call_search",
+                        name="search_products",
+                        arguments={"query": "weather risk"},
+                    ),
+                    ToolCall(
+                        id="call_preview",
+                        name="preview_product",
+                        arguments={"product_id": PRODUCT_ID},
+                    ),
+                ]
+            )
+        ]
+    )
+    ask_seoul = FakeAskSeoulClient(product=product_candidate)
+    runner = AgentRunner(
+        provider=provider,
+        tools=ToolRegistry(ask_seoul=ask_seoul),
+        provider_name="gemini",
+    )
+
+    events = [event async for event in runner.stream("서울 기상 위험", trace_id="trace-1")]
+
+    assert ask_seoul.calls == []
+    assert not any(event["event"] == "tool.call" for event in events)
+    assert any(
+        event["event"] == "session.error"
+        and event["error"]["code"] == "provider_protocol_error"
+        for event in events
+    )
+    done = next(event for event in events if event["event"] == "session.done")
+    assert done["status"] == "completed_with_error"
+
+
+@pytest.mark.anyio
 async def test_no_evidence_final_replaces_provider_prose_with_failure_response() -> None:
     from ask_seoul_agent.agent import AgentRunner
     from ask_seoul_agent.models import EvidenceStatus, ModelTurn
@@ -117,13 +249,16 @@ async def test_runner_stops_when_max_tool_calls_is_reached(product_candidate) ->
             ModelTurn(
                 text=None,
                 tool_calls=[
-                    ToolCall(id="call_1", name="search_products", arguments={"query": "weather"})
-                ],
-            ),
-            ModelTurn(
-                text=None,
-                tool_calls=[
-                    ToolCall(id="call_2", name="search_products", arguments={"query": "risk"})
+                    ToolCall(
+                        id="call_1",
+                        name="search_products",
+                        arguments={"query": "weather"},
+                    ),
+                    ToolCall(
+                        id="call_2",
+                        name="search_products",
+                        arguments={"query": "risk"},
+                    ),
                 ],
             ),
         ]

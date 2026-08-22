@@ -18,3 +18,8 @@ src/ask_seoul_agent/static/
 # Local-only project retrospective, troubleshooting, and career notes.
 # Never publish this wiki to a remote repository.
 /omx_wiki/
+
+# Local visual-QA iterations; keep only the selected final desktop capture public.
+/design-qa*
+!/design-qa-option3-iteration3.png
+/docs/ask-seoul-weather-agent-console.png

@@ -267,6 +267,33 @@ def test_anthropic_report_estimates_cost_from_versioned_model_pricing() -> None:
     assert report.provider.pricing_basis == "anthropic-2026-08-22"
 
 
+def test_gemini_report_records_runtime_limit_and_estimated_cost() -> None:
+    from ask_seoul_agent.evaluation import build_eval_report, evaluate_events, load_eval_manifest
+
+    manifest = load_eval_manifest(MANIFEST_PATH)
+    case = manifest.cases[0]
+    result = evaluate_events(
+        case,
+        _happy_events(),
+        mode="live",
+        checks={name: True for name in case.expectation_for("live").invariants},
+    )
+
+    report = build_eval_report(
+        manifest,
+        mode="live",
+        results=[result],
+        provider_name="gemini",
+        model="gemini-2.5-flash",
+        application_version="0.1.0",
+    )
+
+    expected = (50 * 0.30 + 10 * 2.50) / 1_000_000
+    assert report.contract.max_output_tokens == 2048
+    assert report.summary.estimated_cost_usd == expected
+    assert report.provider.pricing_basis == "gemini-2.5-flash-standard-2026-08-23"
+
+
 def test_api_rejection_scores_pass_only_when_no_work_started() -> None:
     from ask_seoul_agent.evaluation import evaluate_api_outcome, load_eval_manifest
 

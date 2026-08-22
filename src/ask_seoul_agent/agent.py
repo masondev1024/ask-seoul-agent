@@ -65,10 +65,16 @@ class AgentRunner:
             )
             try:
                 remaining = self._remaining(deadline)
+                available_tool_schemas = self._available_tool_schemas(tool_results)
+                allowed_tool_names = {
+                    name
+                    for schema in available_tool_schemas
+                    if isinstance((name := schema.get("name")), str)
+                }
                 async with asyncio.timeout(remaining):
                     turn = await self._provider.complete(
                         messages,
-                        self._tools.schemas(),
+                        available_tool_schemas,
                         timeout_s=min(self._provider_timeout_s, remaining),
                     )
             except ProviderError as exc:
@@ -102,6 +108,14 @@ class AgentRunner:
                 break
 
             usage = usage + turn.usage
+            if any(call.name not in allowed_tool_names for call in turn.tool_calls):
+                terminal_error = True
+                yield self._error_event(
+                    trace_id,
+                    "provider_protocol_error",
+                    "The provider requested a tool that is unavailable in the current stage.",
+                )
+                break
             if not turn.tool_calls:
                 answer_from_model = turn.text
                 break
@@ -269,6 +283,27 @@ class AgentRunner:
         if remaining <= 0:
             raise TimeoutError
         return remaining
+
+    def _available_tool_schemas(
+        self,
+        tool_results: list[ToolResult],
+    ) -> list[dict[str, Any]]:
+        schemas = self._tools.schemas()
+        if not tool_results:
+            allowed_name = "search_products"
+        else:
+            latest = tool_results[-1]
+            candidates = latest.content.get("candidates")
+            if (
+                latest.tool == "search_products"
+                and latest.status == "ok"
+                and isinstance(candidates, list)
+                and bool(candidates)
+            ):
+                allowed_name = "preview_product"
+            else:
+                return []
+        return [schema for schema in schemas if schema.get("name") == allowed_name]
 
     @staticmethod
     def _event(event: str, trace_id: str, **payload: Any) -> dict[str, Any]:

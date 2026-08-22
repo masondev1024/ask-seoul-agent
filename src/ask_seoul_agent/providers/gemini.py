@@ -14,13 +14,14 @@ from pydantic import ValidationError
 
 from ask_seoul_agent.models import ModelTurn, ToolCall, ToolResult, Usage
 from ask_seoul_agent.providers.anthropic import (
-    MAX_TOKENS,
     SYSTEM_PROMPT,
     fixed_tool_schemas,
 )
 from ask_seoul_agent.providers.base import Message, ProviderError, ToolSchema
 
 DEFAULT_MODEL = "gemini-2.5-flash"
+MAX_OUTPUT_TOKENS = 2048
+THINKING_BUDGET = 0
 _THOUGHT_SIGNATURE = "gemini_thought_signature"
 _PROVIDER_PARTS = "gemini_parts"
 _SECRET_RE = re.compile(
@@ -69,7 +70,11 @@ class GeminiGenerateContentProvider:
     ) -> ModelTurn:
         config = types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
-            max_output_tokens=MAX_TOKENS,
+            max_output_tokens=MAX_OUTPUT_TOKENS,
+            thinking_config=types.ThinkingConfig(
+                thinking_budget=THINKING_BUDGET,
+                include_thoughts=False,
+            ),
             tools=_to_gemini_tools(tools),
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             http_options=types.HttpOptions(
@@ -282,7 +287,7 @@ def _tool_content(result: ToolResult) -> types.Content:
         "request_id": result.request_id,
     }
     return types.Content(
-        role="tool",
+        role="user",
         parts=[
             types.Part(
                 function_response=types.FunctionResponse(

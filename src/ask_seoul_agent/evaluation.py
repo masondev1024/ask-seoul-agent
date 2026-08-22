@@ -162,7 +162,7 @@ class EvalContract(StrictModel):
     tool_schema_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     max_rounds: int = Field(default=4, ge=4, le=4)
     max_tool_calls: int = Field(default=4, ge=4, le=4)
-    max_output_tokens: int = Field(default=1024, ge=1024, le=1024)
+    max_output_tokens: int = Field(default=1024, ge=1024, le=2048)
 
 
 class EvalReportSummary(StrictModel):
@@ -373,7 +373,7 @@ def build_eval_report(
         dataset_sha256=sha256(canonical_manifest.encode("utf-8")).hexdigest(),
         mode=mode,
         provider=EvalProvider(name=provider_name, model=model, pricing_basis=pricing_basis),
-        contract=_eval_contract(),
+        contract=_eval_contract(provider_name),
         summary=EvalReportSummary(
             total=len(results),
             passed=passed,
@@ -522,7 +522,7 @@ def _non_negative_int(value: Any) -> int:
     return value if isinstance(value, int) and value >= 0 else 0
 
 
-def _eval_contract() -> EvalContract:
+def _eval_contract(provider_name: str) -> EvalContract:
     from .providers.anthropic import MAX_TOKENS, SYSTEM_PROMPT, fixed_tool_schemas
 
     canonical_tools = json.dumps(
@@ -531,10 +531,15 @@ def _eval_contract() -> EvalContract:
         sort_keys=True,
         separators=(",", ":"),
     )
+    max_output_tokens = MAX_TOKENS
+    if provider_name == "gemini":
+        from .providers.gemini import MAX_OUTPUT_TOKENS
+
+        max_output_tokens = MAX_OUTPUT_TOKENS
     return EvalContract(
         system_prompt_sha256=sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest(),
         tool_schema_sha256=sha256(canonical_tools.encode("utf-8")).hexdigest(),
-        max_output_tokens=MAX_TOKENS,
+        max_output_tokens=max_output_tokens,
     )
 
 
@@ -545,6 +550,9 @@ def _estimated_cost(
     input_tokens: int,
     output_tokens: int,
 ) -> tuple[float | None, str | None]:
+    if provider_name == "gemini" and model == "gemini-2.5-flash":
+        cost = (input_tokens * 0.30 + output_tokens * 2.50) / 1_000_000
+        return round(cost, 8), "gemini-2.5-flash-standard-2026-08-23"
     if provider_name != "anthropic" or model != "claude-sonnet-5":
         return None, None
     cost = (input_tokens * 2.0 + output_tokens * 10.0) / 1_000_000

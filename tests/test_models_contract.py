@@ -34,6 +34,17 @@ def test_tool_call_rejects_invalid_product_id_argument() -> None:
         )
 
 
+def test_tool_call_rejects_safe_but_non_weather_product_id() -> None:
+    from ask_seoul_agent.models import ToolCall
+
+    with pytest.raises(ValidationError):
+        ToolCall(
+            id="call_1",
+            name="preview_product",
+            arguments={"product_id": "transit_route_current"},
+        )
+
+
 def test_final_envelope_fails_closed_when_no_evidence_exists() -> None:
     from ask_seoul_agent.models import EvidenceStatus, FinalEnvelope
 
@@ -99,3 +110,28 @@ def test_final_envelope_fails_closed_for_empty_preview_rows() -> None:
     assert envelope.evidence_status == EvidenceStatus.INSUFFICIENT_DATA
     assert envelope.evidence == []
     assert "claims a result" not in envelope.answer
+
+
+def test_final_envelope_rejects_non_weather_preview_as_evidence() -> None:
+    from ask_seoul_agent.models import EvidenceStatus, FinalEnvelope, ToolResult
+
+    result = ToolResult(
+        call_id="call_1",
+        tool="preview_product",
+        status="ok",
+        content={"product_id": "transit_route_current", "rows": [{"route": "blue"}]},
+        source="https://ask-seoul.kr/api/v1/preview/transit_route_current",
+    )
+
+    envelope = FinalEnvelope.from_agent_state(
+        trace_id="trace-1",
+        provider="demo",
+        answer_from_model="교통 데이터를 근거로 한 답변",
+        tool_results=[result],
+        usage=None,
+        elapsed_ms=10,
+    )
+
+    assert envelope.evidence_status == EvidenceStatus.INSUFFICIENT_DATA
+    assert envelope.evidence == []
+    assert "교통 데이터를 근거로 한 답변" not in envelope.answer

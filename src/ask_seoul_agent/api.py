@@ -29,6 +29,7 @@ from .providers.demo import DemoProvider
 from .providers.gemini import DEFAULT_MODEL as GEMINI_DEFAULT_MODEL
 from .providers.gemini import GeminiGenerateContentProvider
 from .tools import AskSeoulPort, ToolRegistry
+from .weather_catalog import WEATHER_PRODUCTS
 
 ASK_SEOUL_BASE_URL = "https://ask-seoul.kr"
 
@@ -114,9 +115,11 @@ def create_app(
                 await owned_http.aclose()
 
     app = FastAPI(
-        title="ASK Seoul Agent",
+        title="ASK Seoul Weather Agent",
         version=__version__,
-        description="Evidence-first, bounded LLM tool calling over ASK Seoul public data products.",
+        description=(
+            "Evidence-first, bounded LLM tool calling over four served ASK Seoul weather products."
+        ),
         lifespan=lifespan,
     )
 
@@ -173,6 +176,10 @@ def create_app(
             "ready": runner is not None,
             "demo_is_llm": False,
             "tools": ["search_products", "preview_product"],
+            "supported_products": [
+                {"product_id": product.product_id, "title": product.title}
+                for product in WEATHER_PRODUCTS
+            ],
         }
 
     @app.post("/api/v1/chat/stream")

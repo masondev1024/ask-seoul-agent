@@ -4,15 +4,24 @@ set -euo pipefail
 SERVICE="${SERVICE:-ask-seoul-agent}"
 BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 PYTHON_BIN="${PYTHON:-python3}"
+SMOKE_PROVIDER="${SMOKE_PROVIDER:-demo}"
+
+case "${SMOKE_PROVIDER}" in
+  demo|gemini|anthropic) ;;
+  *)
+    echo "unsupported SMOKE_PROVIDER: ${SMOKE_PROVIDER}" >&2
+    exit 2
+    ;;
+esac
 
 cleanup() {
   docker compose down --remove-orphans >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-docker compose up --build --detach "${SERVICE}"
+AGENT_PROVIDER="${SMOKE_PROVIDER}" docker compose up --build --detach "${SERVICE}"
 
-"${PYTHON_BIN}" - "${BASE_URL}" <<'PY'
+"${PYTHON_BIN}" - "${BASE_URL}" "${SMOKE_PROVIDER}" <<'PY'
 import json
 import subprocess
 import sys
@@ -21,6 +30,7 @@ import urllib.error
 import urllib.request
 
 base_url = sys.argv[1]
+expected_provider = sys.argv[2]
 
 def get_json(path: str) -> dict:
     with urllib.request.urlopen(f"{base_url}{path}", timeout=3) as response:
@@ -46,8 +56,8 @@ while True:
 
 assert live["status"] == "ok", live
 assert ready["status"] == "ready", ready
-assert ready["provider_mode"] == "demo", ready
-assert meta["provider_mode"] == "demo", meta
+assert ready["provider_mode"] == expected_provider, ready
+assert meta["provider_mode"] == expected_provider, meta
 assert meta["ready"] is True, meta
 assert "<!doctype html>" in index.lower(), "frontend index was not served at /"
 print("container smoke ok")

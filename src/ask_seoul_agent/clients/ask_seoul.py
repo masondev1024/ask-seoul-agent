@@ -10,12 +10,26 @@ from urllib.parse import quote
 
 import httpx
 
+from ask_seoul_agent.weather_catalog import (
+    WEATHER_PRODUCT_BY_ID,
+    WEATHER_PRODUCT_ID_SET,
+    WEATHER_PRODUCT_IDS,
+)
+
 JsonObject = dict[str, Any]
 Sleeper = Callable[[float], Awaitable[None]]
 Jitter = Callable[[float], float]
 
 _PRODUCT_ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,127}$")
-_QUALITY_TOKENS = ("freshness", "stale", "quality", "publication")
+_QUALITY_TOKENS = (
+    "freshness",
+    "stale",
+    "quality",
+    "publication",
+    "product_not_ready",
+    "품질",
+    "발행",
+)
 
 
 class UpstreamError(Exception):
@@ -129,10 +143,10 @@ class AskSeoulClient:
         self._jitter = jitter or (lambda delay: delay + random.uniform(0.0, delay / 2))
 
     async def search_products(self, query: str) -> list[JsonObject]:
-        safe_query = self._validate_query(query)
+        self._validate_query(query)
         payload = await self._get_json(
-            "/api/v1/search",
-            params={"q": safe_query},
+            "/api/v1/catalog",
+            params=None,
             operation="search_products",
         )
         products = payload.get("products")
@@ -143,21 +157,21 @@ class AskSeoulClient:
                 retryable=False,
             )
 
-        results: list[JsonObject] = []
-        for item in products[:3]:
-            product_id = item.get("product_id") if isinstance(item, dict) else None
-            if (
-                not isinstance(item, dict)
-                or not isinstance(product_id, str)
-                or not _PRODUCT_ID_PATTERN.fullmatch(product_id)
-            ):
-                raise UpstreamSchemaError(
-                    "ASK Seoul search product schema mismatch",
-                    code="upstream_schema_error",
-                    retryable=False,
-                )
-            results.append(dict(item))
-        return results
+        by_id: dict[str, JsonObject] = {}
+        for item in products:
+            if not isinstance(item, dict):
+                continue
+            product_id = item.get("product_id")
+            if not isinstance(product_id, str):
+                continue
+            if product_id not in WEATHER_PRODUCT_ID_SET:
+                continue
+            normalized = dict(item)
+            product = WEATHER_PRODUCT_BY_ID[product_id]
+            normalized.setdefault("title", product.title)
+            normalized.setdefault("product_question", product.question)
+            by_id[product_id] = normalized
+        return [by_id[product_id] for product_id in WEATHER_PRODUCT_IDS if product_id in by_id]
 
     async def preview_product(self, product_id: str) -> JsonObject:
         safe_product_id = self._validate_product_id(product_id)
@@ -234,7 +248,7 @@ class AskSeoulClient:
 
             if response.status_code == 503 and self._is_quality_failure(response):
                 raise UpstreamQualityError(
-                    "ASK Seoul data product failed freshness or publication quality gate",
+                    "요청한 ASK Seoul 기상 제품의 품질 또는 최신성 검증이 준비되지 않았습니다.",
                     code="upstream_quality_error",
                     retryable=False,
                     status_code=response.status_code,
@@ -371,4 +385,6 @@ class AskSeoulClient:
         normalized = product_id.strip()
         if not _PRODUCT_ID_PATTERN.fullmatch(normalized):
             raise ValueError("ASK Seoul product_id contains invalid characters")
+        if normalized not in WEATHER_PRODUCT_ID_SET:
+            raise ValueError("현재 운영 중인 ASK Seoul 기상 제품 4개만 조회할 수 있습니다")
         return normalized

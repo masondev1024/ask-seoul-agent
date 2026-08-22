@@ -8,6 +8,11 @@ from typing import Any
 from ask_seoul_agent.models import ModelTurn, ToolCall, ToolResult, Usage
 from ask_seoul_agent.providers.anthropic import fixed_tool_schemas
 from ask_seoul_agent.providers.base import Message, ToolSchema
+from ask_seoul_agent.weather_catalog import (
+    is_weather_product_id,
+    select_weather_product_id,
+    weather_product_title,
+)
 
 
 class DemoProvider:
@@ -33,7 +38,7 @@ class DemoProvider:
                     ToolCall(
                         id="demo_search_1",
                         name="search_products",
-                        arguments={"query": question[:200] or "weather risk"},
+                        arguments={"query": question[:200] or "서울 기상 위험"},
                     )
                 ],
                 usage=Usage(input_tokens=0, output_tokens=0),
@@ -46,24 +51,32 @@ class DemoProvider:
             and latest.status == "ok"
         ):
             candidates = latest.content.get("candidates", [])
-            if candidates:
-                product_id = candidates[0].get("product_id")
-                if isinstance(product_id, str):
-                    return ModelTurn(
-                        text=None,
-                        tool_calls=[
-                            ToolCall(
-                                id="demo_preview_1",
-                                name="preview_product",
-                                arguments={"product_id": product_id},
-                            )
-                        ],
-                        usage=Usage(input_tokens=0, output_tokens=0),
-                    )
+            available_product_ids = {
+                product_id
+                for candidate in candidates
+                if isinstance(candidate, Mapping)
+                and is_weather_product_id(product_id := candidate.get("product_id"))
+            }
+            product_id = select_weather_product_id(
+                _last_user_text(messages),
+                available_product_ids=available_product_ids,
+            )
+            if product_id is not None:
+                return ModelTurn(
+                    text=None,
+                    tool_calls=[
+                        ToolCall(
+                            id="demo_preview_1",
+                            name="preview_product",
+                            arguments={"product_id": product_id},
+                        )
+                    ],
+                    usage=Usage(input_tokens=0, output_tokens=0),
+                )
             return ModelTurn(
                 text=(
-                    "Demo provider: ASK Seoul search returned no candidate products, "
-                    "so no grounded answer can be produced."
+                    "현재 제공 중인 ASK Seoul 기상 제품 4개 범위에서 질문과 맞는 "
+                    "제품을 찾지 못했습니다."
                 ),
                 tool_calls=[],
                 usage=Usage(input_tokens=0, output_tokens=0),
@@ -76,12 +89,12 @@ class DemoProvider:
         ):
             rows = latest.content.get("rows", [])
             product_id = latest.content.get("product_id", "unknown")
-            summary = _summarize_rows(rows)
+            summary = _summarize_rows(rows, product_id=product_id)
             return ModelTurn(
                 text=(
-                    "Demo provider, not a live LLM: "
-                    f"preview sample for {product_id} contains "
-                    f"{len(rows) if isinstance(rows, list) else 0} rows. "
+                    "실제 LLM이 아닌 로컬 데모 모드입니다. "
+                    f"{weather_product_title(str(product_id))}의 "
+                    f"미리보기에서 {len(rows) if isinstance(rows, list) else 0}행을 확인했습니다. "
                     f"{summary}"
                 ),
                 tool_calls=[],
@@ -89,7 +102,7 @@ class DemoProvider:
             )
 
         return ModelTurn(
-            text="Demo provider: tool execution did not return usable preview evidence.",
+            text="도구 실행에서 답변에 사용할 수 있는 기상 미리보기 근거를 얻지 못했습니다.",
             tool_calls=[],
             usage=Usage(input_tokens=0, output_tokens=0),
         )
@@ -108,12 +121,12 @@ def _last_user_text(messages: Sequence[Message]) -> str:
             stripped = content.strip()
             if stripped:
                 return stripped
-    return "weather risk"
+    return "서울 기상 위험"
 
 
-def _summarize_rows(rows: Any) -> str:
+def _summarize_rows(rows: Any, *, product_id: object) -> str:
     if not isinstance(rows, list) or not rows:
-        return "No preview rows were returned."
+        return "반환된 미리보기 행이 없습니다."
     parts: list[str] = []
     for row in rows[:3]:
         if isinstance(row, Mapping):
@@ -123,16 +136,42 @@ def _summarize_rows(rows: Any) -> str:
                 or row.get("place")
                 or row.get("dong")
                 or row.get("name")
-                or "unknown place"
+                or "장소 미상"
             )
-            risk = (
-                row.get("risk_labels") or row.get("risk") or row.get("risk_level") or "unknown risk"
-            )
-            window = (
-                row.get("forecast_at")
-                or row.get("window")
-                or row.get("time_window")
-                or "unknown window"
-            )
-            parts.append(f"{place}: {risk} during {window}")
-    return "Sample rows: " + "; ".join(parts) if parts else "Preview rows were returned."
+            if product_id == "weather_place_forecast_change_daily":
+                raw_state = row.get("change_state")
+                state = {
+                    "unchanged": "변화 없음",
+                    "changed": "변경됨",
+                    "new": "새 예보",
+                }.get(str(raw_state), "변화 상태 미상")
+                forecast_date = row.get("forecast_date") or "날짜 미상"
+                parts.append(f"{place}: {forecast_date} 예보 {state}")
+            elif product_id == "weather_place_precipitation_window":
+                start = row.get("window_start_at") or "시작 시각 미상"
+                end = row.get("window_end_at") or "종료 시각 미상"
+                probability = row.get("precip_prob_max_pct")
+                probability_text = (
+                    f", 최대 강수확률 {probability}%" if probability is not None else ""
+                )
+                parts.append(f"{place}: {start}~{end}{probability_text}")
+            elif product_id == "weather_place_current_outlook":
+                forecast_at = row.get("forecast_at") or "예보 시각 미상"
+                temperature = row.get("temp_c")
+                temperature_text = f", {temperature}℃" if temperature is not None else ""
+                parts.append(f"{place}: {forecast_at}{temperature_text}")
+            else:
+                risk = (
+                    row.get("risk_labels")
+                    or row.get("risk")
+                    or row.get("risk_level")
+                    or "위험 정보 미상"
+                )
+                window = (
+                    row.get("forecast_at")
+                    or row.get("window")
+                    or row.get("time_window")
+                    or "시간대 미상"
+                )
+                parts.append(f"{place}: {window}, {risk}")
+    return "샘플 요약:\n- " + "\n- ".join(parts) if parts else "미리보기 행을 확인했습니다."

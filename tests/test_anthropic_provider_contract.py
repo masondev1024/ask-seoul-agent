@@ -50,10 +50,12 @@ def test_anthropic_tool_schema_uses_fixed_input_schema() -> None:
 
     assert {tool["name"] for tool in schemas} == {"search_products", "preview_product"}
     preview_schema = next(tool for tool in schemas if tool["name"] == "preview_product")
-    assert (
-        preview_schema["input_schema"]["properties"]["product_id"]["pattern"]
-        == "^[A-Za-z][A-Za-z0-9_]{0,127}$"
-    )
+    assert preview_schema["input_schema"]["properties"]["product_id"]["enum"] == [
+        "weather_place_current_outlook",
+        "weather_place_forecast_change_daily",
+        "weather_place_precipitation_window",
+        "weather_place_risk_window",
+    ]
 
 
 @pytest.mark.anyio

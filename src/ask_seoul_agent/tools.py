@@ -7,7 +7,13 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from .models import PRODUCT_ID_PATTERN, ToolResult
+from .models import ToolResult
+from .weather_catalog import (
+    WeatherProductId,
+    filter_weather_products,
+    is_explicitly_out_of_scope,
+    is_weather_product_id,
+)
 
 
 class AskSeoulPort(Protocol):
@@ -23,7 +29,7 @@ class SearchProductsInput(BaseModel):
 
 class PreviewProductInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    product_id: str = Field(pattern=PRODUCT_ID_PATTERN)
+    product_id: WeatherProductId
 
 
 class ToolExecutionError(RuntimeError):
@@ -49,16 +55,16 @@ class ToolRegistry:
             {
                 "name": "search_products",
                 "description": (
-                    "Search ASK Seoul public data products for the user's question. "
-                    "This discovers candidates but is not evidence for a factual answer."
+                    "현재 운영 중인 ASK Seoul 기상 제품 4개에서 질문과 관련된 후보를 "
+                    "찾습니다. 검색 결과 자체는 사실 답변의 근거가 아닙니다."
                 ),
                 "input_schema": SearchProductsInput.model_json_schema(),
             },
             {
                 "name": "preview_product",
                 "description": (
-                    "Read the public five-row sample for a product returned by search_products "
-                    "during this request. The result is sample-only evidence."
+                    "이 요청에서 search_products가 발견한 기상 제품의 공개 5행 "
+                    "미리보기를 조회합니다. 결과는 샘플 근거로만 사용합니다."
                 ),
                 "input_schema": PreviewProductInput.model_json_schema(),
             },
@@ -77,8 +83,18 @@ class ToolRegistry:
         safe_call_id = call_id or f"tool_{name}"
         if name == "search_products":
             parsed = self._parse(SearchProductsInput, arguments)
+            if is_explicitly_out_of_scope(parsed.query):
+                return ToolResult(
+                    call_id=safe_call_id,
+                    tool=name,
+                    status="ok",
+                    content={"candidates": []},
+                    source="https://ask-seoul.kr/api/v1/catalog",
+                )
             products = await self._ask_seoul.search_products(parsed.query.strip())
-            bounded = [_bounded_mapping(product) for product in products[:3]]
+            bounded = [
+                _search_candidate(product) for product in filter_weather_products(products)
+            ]
             context.discovered_products.update(
                 {
                     product_id: product
@@ -91,17 +107,22 @@ class ToolRegistry:
                 tool=name,
                 status="ok",
                 content={"candidates": bounded},
-                source="https://ask-seoul.kr/api/v1/search",
+                source="https://ask-seoul.kr/api/v1/catalog",
             )
 
         if name == "preview_product":
             parsed = self._parse(PreviewProductInput, arguments)
+            if not is_weather_product_id(parsed.product_id):
+                raise ToolExecutionError(
+                    "unsupported_product_scope",
+                    "현재 운영 중인 기상 제품 4개만 조회할 수 있습니다.",
+                )
             product = context.discovered_products.get(parsed.product_id)
             if product is None:
                 raise ToolExecutionError(
                     "product_not_discovered",
-                    "preview_product may only use a product returned by "
-                    "search_products in this request",
+                    "preview_product는 이 요청의 search_products가 발견한 "
+                    "기상 제품에만 사용할 수 있습니다.",
                 )
             payload = _bounded_mapping(await self._ask_seoul.preview_product(parsed.product_id))
             payload["product_id"] = parsed.product_id
@@ -134,6 +155,24 @@ class ToolRegistry:
 def _bounded_mapping(value: dict[str, Any]) -> dict[str, Any]:
     bounded = _bounded_value(value)
     return bounded if isinstance(bounded, dict) else {}
+
+
+def _search_candidate(product: dict[str, Any]) -> dict[str, Any]:
+    candidate: dict[str, Any] = {}
+    for key in (
+        "product_id",
+        "title",
+        "product_question",
+        "description",
+        "freshness",
+        "row_count",
+        "time_axis",
+        "grain",
+    ):
+        value = product.get(key)
+        if value is not None:
+            candidate[key] = _bounded_value(value)
+    return candidate
 
 
 def _bounded_value(value: Any) -> Any:

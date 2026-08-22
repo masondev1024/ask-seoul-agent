@@ -96,10 +96,12 @@ def test_gemini_declares_allowlisted_tools_with_function_declarations() -> None:
 
     assert {tool["name"] for tool in schemas} == {"search_products", "preview_product"}
     preview_schema = next(tool for tool in schemas if tool["name"] == "preview_product")
-    assert (
-        preview_schema["input_schema"]["properties"]["product_id"]["pattern"]
-        == "^[A-Za-z][A-Za-z0-9_]{0,127}$"
-    )
+    assert preview_schema["input_schema"]["properties"]["product_id"]["enum"] == [
+        "weather_place_current_outlook",
+        "weather_place_forecast_change_daily",
+        "weather_place_precipitation_window",
+        "weather_place_risk_window",
+    ]
 
 
 @pytest.mark.anyio
@@ -122,7 +124,10 @@ async def test_gemini_sends_system_instruction_and_converted_tools() -> None:
     system_instruction = _config_value(config, "system_instruction").lower()
     assert "untrusted data" in system_instruction
     assert "always call search_products" in system_instruction
-    assert _config_value(config, "max_output_tokens") == 1024
+    assert _config_value(config, "max_output_tokens") == 2048
+    thinking = _config_value(config, "thinking_config")
+    assert _read(thinking, "thinking_budget") == 0
+    assert _read(thinking, "include_thoughts") is False
     automatic = _config_value(config, "automatic_function_calling")
     assert _read(automatic, "disable") is True
     http_options = _config_value(config, "http_options")
@@ -329,7 +334,7 @@ async def test_gemini_places_tool_response_after_model_function_call() -> None:
     sent_call = _read(_content_parts(model_content)[0], "function_call")
     assert _read(sent_call, "name") == "search_products"
     assert _read(sent_call, "id") == "gemini-call-1"
-    assert _read(tool_content, "role") == "tool"
+    assert _read(tool_content, "role") == "user"
     sent_response = _read(_content_parts(tool_content)[0], "function_response")
     assert _read(sent_response, "name") == "search_products"
     assert _read(sent_response, "id") == "gemini-call-1"

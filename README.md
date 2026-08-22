@@ -1,10 +1,10 @@
 # ASK Seoul Agent
 
-ASK Seoul의 공개 데이터 상품 API를 직접 복사하지 않고, API 계약으로 호출하는 evidence-first AI Agent 서비스입니다. 현재 구현은 FastAPI SSE backend, React console UI, Gemini GenerateContent/Anthropic Messages API adapter, keyless demo provider, ASK Seoul public REST adapter로 구성되어 있습니다.
+ASK Seoul의 공개 데이터 상품 API를 직접 복사하지 않고, 현재 서빙 중인 4개 기상 제품만 API 계약으로 호출하는 evidence-first AI Agent 서비스입니다. 현재 구현은 FastAPI SSE backend, React console UI, Gemini GenerateContent/Anthropic Messages API adapter, keyless demo provider, ASK Seoul public REST adapter로 구성되어 있습니다.
 
 중요: `demo` provider는 LLM이 아닙니다. 로컬 E2E와 UI 검증을 위한 결정적 provider입니다. 외부 LLM 호출은 로컬 `.env`의 자격 증명과 실행 시 opt-in flag가 모두 있어야 하며, 기본 테스트/CI에서는 실행되지 않습니다.
 
-![ASK Seoul Agent console showing the streamed tool timeline and bounded evidence](docs/ask-seoul-agent-console.png)
+![ASK Seoul weather agent console showing a Korean answer and bounded evidence](design-qa-option3-iteration3.png)
 
 화면은 `demo` provider가 실제 ASK Seoul public REST의 search/preview를 호출한 live-data smoke 결과입니다. 모델 생성 결과를 캡처한 화면은 아닙니다.
 
@@ -13,15 +13,17 @@ ASK Seoul의 공개 데이터 상품 API를 직접 복사하지 않고, API 계�
 이 저장소의 개인 기여 경계는 “ASK Seoul 데이터 상품을 사람이 보는 마켓플레이스에서, 에이전트가 안전하게 소비하는 서비스 계층으로 확장”한 부분입니다.
 
 - 조직 프로젝트의 코드를 복사하지 않고, `https://ask-seoul.kr`의 공개 REST 계약을 client adapter로 통합했습니다.
-- 모델이 SQL이나 임의 URL을 만들지 못하게 `search_products`, `preview_product` 두 도구만 allowlist로 열었습니다.
+- agent 범위는 `weather_place_current_outlook`, `weather_place_forecast_change_daily`, `weather_place_precipitation_window`, `weather_place_risk_window` 4개 제품으로 제한합니다.
+- 모델이 SQL이나 임의 URL을 만들지 못하게 `search_products`, `preview_product` 두 도구만 allowlist로 열고, transit/traffic/culture/population 같은 중단·비대상 도메인으로 fallback하지 않습니다.
 - 답변은 반드시 `preview_product` evidence가 있어야 생성되며, 없으면 `insufficient_data`로 fail-closed 합니다.
+- 사용자 답변과 브라우저 UI의 scope/error 메시지는 한국어로 표시합니다.
 - SSE timeline, trace id, provider mode, evidence envelope를 UI와 API에 노출해 면접에서 agent loop와 운영 경계를 설명할 수 있게 했습니다.
 
 ## 문제와 해결
 
 문제: 일반 챗봇은 “서울 데이터에 대해 그럴듯하게 답하는 것”은 쉽지만, 실제 데이터 상품 상태, freshness, sample-only 한계, upstream 실패를 구분하지 못하면 운영 서비스로 보기 어렵습니다.
 
-해결: LLM을 직접 데이터베이스에 붙이지 않고, ASK Seoul 데이터 상품 계약을 도구로 감싼 bounded agent를 만들었습니다. 모델은 도구 호출을 선택하고, 서비스는 allowlist, schema validation, request-scoped discovery, timeout, tool budget, evidence envelope로 실행을 제어합니다.
+해결: LLM을 직접 데이터베이스에 붙이지 않고, ASK Seoul 기상 데이터 상품 계약을 도구로 감싼 bounded agent를 만들었습니다. 모델은 도구 호출을 선택하지만, 서비스는 4개 weather product allowlist, catalog filtering, preview 재검증, schema validation, request-scoped discovery, timeout, tool budget, evidence envelope로 실행을 제어합니다.
 
 ## Architecture
 
@@ -34,7 +36,7 @@ flowchart LR
   P -->|gemini| GEMINI[Gemini GenerateContent API<br/>function-calling adapter]
   P -->|anthropic| CLAUDE[Anthropic Messages API<br/>tool_use adapter]
   RUN --> TR[ToolRegistry<br/>allowlisted tools]
-  TR -->|search_products| SEARCH[ASK Seoul REST<br/>/api/v1/search]
+  TR -->|search_products| SEARCH[ASK Seoul REST<br/>/api/v1/catalog<br/>4 weather products only]
   TR -->|preview_product| PREVIEW[ASK Seoul REST<br/>/api/v1/preview/{product_id}]
   SEARCH --> CTX[Request-scoped discovered product ids]
   CTX --> PREVIEW
@@ -58,8 +60,8 @@ sequenceDiagram
   Agent->>Provider: complete(messages, tool schemas)
   Provider-->>Agent: tool_call search_products
   Agent->>Tools: execute(search_products)
-  Tools->>Ask: GET /api/v1/search?q=...
-  Ask-->>Tools: up to 3 candidate products
+  Tools->>Ask: GET /api/v1/catalog
+  Ask-->>Tools: up to 4 served weather products
   Tools-->>Agent: tool.result candidates
   Agent->>Provider: complete(messages + tool result)
   Provider-->>Agent: tool_call preview_product
@@ -80,7 +82,8 @@ sequenceDiagram
 | Frontend | React + Vite console, SSE parser, timeline/evidence panels |
 | Provider | `demo`, `gemini`, `anthropic` |
 | Tools | `search_products`, `preview_product` |
-| ASK Seoul 연동 | public REST search/preview |
+| Product scope | 현재 서빙 중인 weather 제품 4개만 허용. 다른 도메인 product id는 upstream preview 전에 거부 |
+| ASK Seoul 연동 | public REST catalog/preview |
 | Security headers | CSP, frame deny, no-sniff, referrer policy, permissions policy |
 | Observability | package-scoped JSON logger, allowlisted operational fields only |
 | Evaluation | versioned 30-case manifest, deterministic release gate, opt-in Gemini/Anthropic live lane |
@@ -106,7 +109,7 @@ curl -sS http://127.0.0.1:8000/health/ready
 curl -sS http://127.0.0.1:8000/api/v1/meta
 curl -sS -N -X POST http://127.0.0.1:8000/api/v1/chat/stream \
   -H 'Content-Type: application/json' \
-  -d '{"question":"weather risk preview"}'
+  -d '{"question":"서울 주요 장소의 폭염이나 호우 위험 시간대를 알려줘"}'
 ```
 
 개발 실행은 checkout의 최신 코드를 확실히 사용하도록 `PYTHONPATH=src`를 명시합니다. 배포 이미지는 editable install이나 `PYTHONPATH`에 의존하지 않고 wheel을 설치합니다.
@@ -196,7 +199,7 @@ UI와 운영자가 현재 mode와 도구 목록을 확인하는 endpoint입니�
 요청:
 
 ```json
-{"question":"weather risk preview"}
+{"question":"서울 주요 장소의 폭염이나 호우 위험 시간대를 알려줘"}
 ```
 
 제약:
@@ -244,7 +247,7 @@ FinalEnvelope 주요 필드:
 }
 ```
 
-`preview_product` evidence가 없으면 provider가 답변 문장을 줘도 최종 응답은 `insufficient_data`로 대체됩니다.
+`preview_product` evidence가 없으면 provider가 답변 문장을 줘도 최종 응답은 한국어 `insufficient_data` 메시지로 대체됩니다. ASK Seoul이 특정 weather 제품에 대해 `product_not_ready`/503 품질 게이트를 반환하면 다른 도메인이나 다른 제품으로 우회하지 않습니다.
 
 ## Provider 및 live 검증 경계
 
@@ -254,11 +257,11 @@ FinalEnvelope 주요 필드:
 | Gemini adapter | contract test 검증됨 | function declaration/call/response 변환, thought signature 보존, finish-reason/error sanitization 테스트 |
 | Anthropic adapter | contract test 검증됨 | tool schema, tool_use parsing, tool_result 변환, error sanitization 테스트 |
 | 30-case deterministic eval | 30/30 통과 | 실제 `AgentRunner`/FastAPI에 scripted provider와 recorded/fault fixture를 주입한 control-plane 회귀평가 |
-| 10-case live harness | contract test 검증됨 | recorded fixture, 직렬 실행, no behavioral retry, infra-inconclusive 분류. 실제 LLM 실행 결과는 아님 |
-| Gemini live API | strict SSE smoke 통과 | Gemini 2.5 Flash + live ASK Seoul REST에서 `search_products -> preview_product -> grounded_preview` 확인 |
-| Gemini 10-case live eval | quota-limited | dataset v2026-08-22.3에서 2 pass, 0 behavioral fail, 8 `inconclusive_infra`; 8건 모두 `provider_rate_limited` |
+| 10-case live harness | Gemini live 검증됨 | recorded fixture, 직렬 실행, no behavioral retry, infra-inconclusive 분류. 최종 clean run 10/10 통과 |
+| Gemini live API | 통과 | Gemini 2.5 Flash + live ASK Seoul REST + public FastAPI SSE smoke 1건 통과 |
+| Gemini 10-case live eval | 통과 | final clean run 10/10, all score 100, `max_output_tokens=2048` |
 | Anthropic live API | opt-in 미실행 | adapter contract는 유지하되 로컬 Anthropic key로 live 호출하지 않음 |
-| Live ASK Seoul REST | smoke 검증됨 | local SSE smoke에서 `/api/v1/search`, `/api/v1/preview/weather_place_risk_window` 호출 성공 |
+| Live ASK Seoul REST | smoke 검증됨 | local SSE smoke에서 `/api/v1/catalog`, `/api/v1/preview/weather_place_risk_window` 호출 성공. `weather_place_current_outlook`은 upstream 품질 게이트 상태에 따라 503 `product_not_ready`가 정상적으로 발생할 수 있음 |
 | MCP/auth query | 미구현 | Phase 2 범위 |
 
 Gemini function calling 구현은 공식 계약을 기준으로 provider adapter에 격리했습니다: [Gemini function calling](https://ai.google.dev/gemini-api/docs/function-calling), [Google Gen AI Python SDK](https://googleapis.github.io/python-genai/).
@@ -291,7 +294,7 @@ AGENT_LIVE_E2E=1 uv run --env-file .env --locked pytest -q -m live \
   -k gemini_and_ask_seoul
 ```
 
-첫 명령은 실제 Gemini 모델을 recorded fixture에 대해 10개 케이스로 평가해 모델 행동과 upstream drift를 분리합니다. 무료 티어에서는 케이스 사이에 75초를 두어 RPM 한도를 스스로 소진하지 않되, 각 케이스 내부의 행동 실패는 재시도하지 않습니다. 두 번째 명령은 실제 Gemini와 live ASK Seoul REST를 public SSE API까지 한 번 관통합니다. 둘 다 기본 CI에서 실행되지 않으며, quota/rate-limit 같은 인프라 실패를 모델 행동 실패와 구분합니다. Anthropic lane은 같은 명령에서 `--provider anthropic` 또는 `LIVE_PROVIDER=anthropic`을 선택해 유지할 수 있습니다.
+첫 명령은 실제 Gemini 모델을 recorded fixture에 대해 10개 케이스로 평가해 모델 행동과 upstream drift를 분리합니다. 필요하면 케이스 사이에 delay를 두어 RPM 한도를 스스로 소진하지 않되, 각 케이스 내부의 행동 실패는 재시도하지 않습니다. 두 번째 명령은 실제 Gemini와 live ASK Seoul REST를 public SSE API까지 한 번 관통합니다. 둘 다 기본 CI에서 실행되지 않으며, quota/rate-limit 같은 인프라 실패를 모델 행동 실패와 구분합니다. Anthropic lane은 같은 명령에서 `--provider anthropic` 또는 `LIVE_PROVIDER=anthropic`을 선택해 유지할 수 있습니다.
 
 동일한 명령의 Make wrapper도 제공합니다.
 
@@ -313,18 +316,27 @@ AGENT_LIVE_E2E=1 make e2e-live-gemini
 | 모델 rate limit/timeout | retryable error로 노출, final은 evidence 여부에 따라 결정 |
 | ASK Seoul timeout/transport error | bounded retry 후 sanitized upstream error |
 | ASK Seoul 429/5xx | `Retry-After`를 고려한 bounded retry |
-| freshness/publication quality 503 | retry하지 않고 `upstream_quality`, hallucination 차단 |
+| freshness/publication quality 503 또는 `product_not_ready` | retry하지 않고 `upstream_quality`, hallucination 및 cross-domain fallback 차단 |
 | schema mismatch | product id, row object shape를 엄격히 검증하고 `upstream_schema_error` |
 | empty preview | evidence로 인정하지 않고 `insufficient_data` |
 | 모델이 unknown tool 요청 | `unknown_tool` |
 | 모델이 검색하지 않은 product preview 요청 | `product_not_discovered` |
+| 모델이 transit 등 비-weather product preview 요청 | `unsupported_product_scope` 또는 tool input validation 단계에서 거부 |
 | tool/round budget 초과 | `tool_budget_exceeded` 또는 `round_budget_exceeded` |
 | 예상하지 못한 provider/tool 예외 | secret을 노출하지 않는 `agent_internal_error` 또는 `tool_internal_error` |
+
+Tool-call 운영 계약:
+
+- 초기 provider turn에는 `search_products`만 노출합니다.
+- `search_products`가 non-empty 후보를 반환한 뒤에만 `preview_product`를 노출합니다.
+- `preview_product` 실행 후, search 결과가 비었을 때, 또는 error 후에는 더 이상 tool을 노출하지 않습니다.
+- 해당 단계에서 노출되지 않은 tool 요청은 upstream 실행 전에 `provider_protocol_error`로 거부합니다.
 
 운영 한계:
 
 - preview evidence는 최대 5행 샘플입니다. 전체 데이터 분석 또는 최신 상태 보장으로 말하면 안 됩니다.
-- Gemini free tier는 quota/rate-limit과 서비스의 데이터 처리 조건을 별도로 확인해야 합니다. 이 lane에는 공개 ASK Seoul 질문/fixture만 보내고 사내·개인·규제 데이터를 넣지 않습니다.
+- 이 agent의 product contract는 4개 weather 제품 전용입니다. transit 등 다른 ASK Seoul 도메인이 catalog에 존재하더라도 검색 후보와 preview 대상에서 제외합니다.
+- Gemini live lane은 quota/rate-limit과 서비스의 데이터 처리 조건을 별도로 확인해야 합니다. 이 lane에는 공개 ASK Seoul 질문/fixture만 보내고 사내·개인·규제 데이터를 넣지 않습니다.
 - 현재 MCP authenticated query가 없어 product별 full query는 지원하지 않습니다.
 - observability는 trace id, provider, tool count, token usage, elapsed time 등 allowlist된 필드만 JSON log로 남깁니다. metrics/exporter는 아직 없습니다.
 - browser-facing response에는 CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`가 붙습니다.
@@ -356,24 +368,28 @@ make smoke-container
 
 ## Verification Results
 
-마지막 검증 시각: 2026-08-22 KST. 이 표는 로컬 실행 스냅샷이고, 최종 기준은 위 Test Commands를 다시 실행한 결과입니다.
+마지막 검증 시각: 2026-08-23 KST. 이 표는 로컬 실행 스냅샷이고, 최종 기준은 위 Test Commands를 다시 실행한 결과입니다.
 
 | 명령 | 결과 |
 | --- | --- |
-| `uv run --locked pytest -q -m 'not live'` | 94 passed, 4 live tests deselected |
+| backend tests | 119 passed, 4 live skipped |
 | `uv run --locked ruff check .` | passed |
-| `MYPYPATH=src uv run --locked mypy` | passed, 18 source files |
-| `make eval-deterministic` | 30/30 passed, 11 golden + 19 red-team |
-| Gemini full v3 live eval | 2 passed, 0 behavioral failed, 8 infra-inconclusive (`provider_rate_limited`) |
-| `npm test -- --run` | 2 passed |
+| `MYPYPATH=src uv run --locked mypy` | passed, 19 source files |
+| `make eval-deterministic` | `reports/deterministic-eval-final-v2-20260823.json`, 30/30 passed, 0 failed, 0 infra, dataset `2026-08-23.1`, 470 input / 122 output |
+| Gemini targeted post-fix live eval | `reports/gemini-live-eval-paid-fix-targeted-20260823.json`, 3/3 passed, 3,459 input / 277 output, estimated USD 0.0017302 |
+| Gemini final clean live eval | `reports/gemini-live-eval-paid-final-v3-20260823.json`, 10/10 passed, all score 100, 0 failed, 0 infra, 11,635 input / 1,297 output, estimated USD 0.006733 |
+| `npm test -- --run` | 14 passed |
 | `npm run typecheck` | passed |
 | `npm run build` | passed |
 | backend local smoke | `/health/live`, `/health/ready`, `/api/v1/meta`, SSE 모두 200 |
 | React dev smoke | Vite dev server 200 OK |
-| Docker build/smoke | multi-stage image build 및 hardened Compose smoke 통과 |
-| Live ASK Seoul SSE | search → preview 5행 → `grounded_preview`, freshness `2026-08-20 11:23:50.065865` |
-| Gemini live smoke | passed: real Gemini 2.5 Flash + live ASK Seoul REST + public SSE |
+| Docker build/smoke | multi-stage image build 및 hardened Compose smoke 통과. `.env`가 gemini여도 `make smoke-container`는 기본 `SMOKE_PROVIDER=demo`로 hermetic 실행 |
+| Weather scope contract tests | `tests/test_weather_scope_contract.py`에서 4개 weather routing, transit 차단, 한국어 demo final을 검증 |
+| Live ASK Seoul demo SSE | 3개 ready product는 `grounded_preview`, current outlook은 `upstream_quality`, transit 질문은 preview 없이 `insufficient_data` |
+| Gemini live smoke | real Gemini + live ASK Seoul REST + public SSE post-fix 1 passed in 6.73s |
 | Anthropic live smoke | not run, `ANTHROPIC_API_KEY` 없음 |
+
+보고서 기반 paid eval 누적 추정 비용은 USD 0.035998입니다. 1 USD = 1,500 KRW로 환산하면 약 54.00원입니다. 실제 public SSE smoke 호출 비용은 이 합계에서 제외합니다.
 
 ## Phase 2: MCP/Auth Query
 
@@ -389,7 +405,7 @@ make smoke-container
 
 ## Resume Bullets
 
-- ASK Seoul 데이터 상품 REST 계약 위에 FastAPI 기반 bounded tool-calling agent를 설계/구현하고, 모델의 임의 SQL/URL 생성을 차단하는 allowlist와 schema validation을 적용했습니다.
+- ASK Seoul weather 데이터 상품 REST 계약 위에 FastAPI 기반 bounded tool-calling agent를 설계/구현하고, 모델의 임의 SQL/URL 생성 및 비대상 도메인 fallback을 차단하는 allowlist와 schema validation을 적용했습니다.
 - Gemini GenerateContent function-calling/Anthropic Messages tool-use adapter와 keyless deterministic demo provider를 분리해, 특정 모델 SDK에 agent core가 종속되지 않도록 만들었습니다.
 - ASK Seoul upstream timeout, 429/5xx retry, freshness quality failure, schema mismatch를 분류하고 evidence 없는 답변은 `insufficient_data`로 fail-closed 처리했습니다.
 - 11개 golden·19개 red-team 평가셋을 버전 관리하고 실제 AgentRunner/FastAPI 경계에서 30/30 결정적 release gate를 구축했으며, 실제 LLM 평가는 opt-in lane으로 분리했습니다.
@@ -397,7 +413,7 @@ make smoke-container
 
 ## Interview Explanation
 
-“ASK Seoul 프로젝트는 원래 사람이 REST/MCP/Skill/Marketplace로 데이터 상품을 소비할 수 있게 만든 플랫폼이었습니다. 저는 여기서 LLM을 데이터베이스에 직접 붙이지 않고, 데이터 상품 계약을 안전한 tool interface로 감싼 agent service를 만들었습니다. 모델은 `search_products`와 `preview_product`만 호출할 수 있고, preview evidence가 없으면 답변을 폐기합니다. 그래서 이 프로젝트의 핵심은 챗봇 UI가 아니라, LLM을 운영 데이터 플랫폼의 contract, quality gate, observability, failure mode 안에 넣는 설계입니다.”
+“ASK Seoul 프로젝트는 원래 사람이 REST/MCP/Skill/Marketplace로 데이터 상품을 소비할 수 있게 만든 플랫폼이었습니다. 저는 여기서 LLM을 데이터베이스에 직접 붙이지 않고, 현재 서빙 중인 4개 weather 데이터 상품 계약을 안전한 tool interface로 감싼 agent service를 만들었습니다. 모델은 `search_products`와 `preview_product`만 호출할 수 있고, 서버가 catalog filtering과 preview 재검증으로 transit 같은 다른 도메인을 차단합니다. preview evidence가 없거나 품질 게이트가 닫히면 답변을 폐기합니다. 그래서 이 프로젝트의 핵심은 챗봇 UI가 아니라, LLM을 운영 데이터 플랫폼의 contract, quality gate, observability, failure mode 안에 넣는 설계입니다.”
 
 ## Provenance
 
