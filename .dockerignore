@@ -1,0 +1,17 @@
+.git
+.github
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.venv
+**/__pycache__
+**/*.py[cod]
+**/.DS_Store
+
+frontend/dist
+frontend/node_modules
+coverage
+htmlcov
+.env
+.env.*
+!.env.example

@@ -1,0 +1,298 @@
+:root {
+  color: #172026;
+  background: #eef2f5;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #2f6f88;
+  outline-offset: 2px;
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 32px;
+}
+
+.workspace {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 18px;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: #52636d;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 0;
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  line-height: 1.04;
+}
+
+h2 {
+  margin-bottom: 0;
+  font-size: 1rem;
+}
+
+h3 {
+  margin-bottom: 10px;
+  font-size: 1rem;
+}
+
+.status-stack {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.mode-badge,
+.trace-badge {
+  border: 1px solid #b9c4ca;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 6px 10px;
+  color: #24313a;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.mode-badge {
+  border-color: #ad7335;
+  background: #fff7ea;
+  color: #6b4116;
+}
+
+.demo-warning,
+.panel,
+.error-panel {
+  border: 1px solid #d3dce1;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.demo-warning {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  color: #594013;
+  background: #fff8e8;
+  border-color: #e2c076;
+}
+
+.question-form {
+  margin-bottom: 16px;
+}
+
+.question-form label {
+  display: block;
+  margin-bottom: 8px;
+  color: #2d3b43;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.input-row {
+  display: grid;
+  grid-template-columns: 1fr 132px;
+  gap: 12px;
+}
+
+textarea {
+  width: 100%;
+  min-height: 92px;
+  resize: vertical;
+  border: 1px solid #b7c4cb;
+  border-radius: 8px;
+  padding: 14px;
+  color: #172026;
+  background: #ffffff;
+}
+
+button {
+  align-self: stretch;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 18px;
+  color: #ffffff;
+  background: #1f6f8b;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.error-panel {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  color: #8a1d1d;
+  background: #fff0ef;
+  border-color: #e5b0aa;
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.panel {
+  padding: 18px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.panel-header span {
+  color: #52636d;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.muted {
+  margin-bottom: 0;
+  color: #65737c;
+}
+
+.answer-text {
+  margin-bottom: 0;
+  white-space: pre-wrap;
+  font-size: 1.08rem;
+}
+
+.timeline {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.timeline li {
+  padding-left: 4px;
+}
+
+.timeline strong {
+  display: block;
+  color: #1d3440;
+}
+
+.timeline span {
+  display: block;
+  color: #64727b;
+  overflow-wrap: anywhere;
+}
+
+.evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.evidence-card {
+  border: 1px solid #d6dfe4;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fbfcfd;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+dt {
+  color: #65737c;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+pre {
+  max-height: 280px;
+  overflow: auto;
+  margin: 0;
+  border-radius: 6px;
+  padding: 12px;
+  color: #12222b;
+  background: #eef3f5;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    padding: 18px;
+  }
+
+  .topbar,
+  .input-row,
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    display: grid;
+  }
+
+  .status-stack {
+    justify-content: flex-start;
+  }
+
+  button {
+    min-height: 48px;
+  }
+}
