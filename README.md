@@ -26,7 +26,7 @@ ASK Seoul의 공개 데이터 상품 API를 직접 복사하지 않고, 현재 �
 | 브랜치 | 역할 | 규칙 |
 | --- | --- | --- |
 | `dev` | 개발 통합 브랜치 | 기능 브랜치를 merge하고 CI와 결정론적 평가를 통과시킴 |
-| `main` | release 브랜치 | 직접 작업하지 않고, 검증된 `dev`만 fast-forward merge |
+| `main` | release 브랜치 | 직접 push하지 않고, CI를 통과한 `dev` release PR만 merge |
 | `feature/*`, `fix/*` | 단위 작업 브랜치 | `dev`에서 생성하고 완료 후 `dev`로 merge |
 
 새 작업은 다음처럼 시작합니다.
@@ -44,17 +44,23 @@ PYTHONPATH=src uv run --locked python -m ask_seoul_agent.eval_cli deterministic 
   --output /tmp/ask-seoul-deterministic.json
 ```
 
-release는 `dev`의 CI가 통과한 뒤 `main`에 fast-forward로 반영합니다.
+release는 `dev`의 CI와 결정론적 평가가 통과한 뒤 `main` release PR로 반영합니다. `main`은 보호 규칙으로 직접 push를 막고, 개인 저장소에서도 PR 이벤트를 release 기록으로 남깁니다.
 
 ```bash
 git switch dev
 git pull --ff-only origin dev
 make ci
 
-git switch main
+git push origin dev
+gh pr create --base main --head dev --title "release: <summary>" --body "CI와 deterministic eval 통과"
+gh pr checks --watch
+gh pr merge --merge --delete-branch=false
+
+# release 후 dev를 main과 다시 동기화
+git switch dev
+git pull --ff-only origin dev
 git pull --ff-only origin main
-git merge --ff-only dev
-git push origin main
+git push origin dev
 ```
 
 개인 저장소에서도 `main`에는 release 가능한 상태만 남기고, 일반 개발은 `dev` 또는 작업 브랜치에서 진행하는 것을 원칙으로 합니다.
@@ -126,7 +132,7 @@ sequenceDiagram
 | ASK Seoul 연동 | public REST catalog/preview |
 | Security headers | CSP, frame deny, no-sniff, referrer policy, permissions policy |
 | Observability | package-scoped JSON logger, allowlisted operational fields only |
-| Evaluation | versioned 30-case manifest, deterministic release gate, opt-in Gemini/Anthropic live lane |
+| Evaluation | versioned 30-case manifest, CI deterministic release gate, opt-in Gemini/Anthropic live lane |
 | MCP/auth query | 아직 미구현, Phase 2 |
 | Delivery | multi-stage Docker image, hardened Compose, GitHub Actions CI |
 | DB/SQL | 이 repo는 DB를 직접 붙이지 않음. ASK Seoul data product API를 소비하는 agent service |
