@@ -19,6 +19,46 @@ ASK Seoul의 공개 데이터 상품 API를 직접 복사하지 않고, 현재 �
 - 사용자 답변과 브라우저 UI의 scope/error 메시지는 한국어로 표시합니다.
 - SSE timeline, trace id, provider mode, evidence envelope를 UI와 API에 노출해 면접에서 agent loop와 운영 경계를 설명할 수 있게 했습니다.
 
+## Branch와 release workflow
+
+이 저장소는 `dev`에서 개발·통합하고, 검증된 변경만 `main`으로 release하는 흐름을 사용합니다.
+
+| 브랜치 | 역할 | 규칙 |
+| --- | --- | --- |
+| `dev` | 개발 통합 브랜치 | 기능 브랜치를 merge하고 CI와 결정론적 평가를 통과시킴 |
+| `main` | release 브랜치 | 직접 작업하지 않고, 검증된 `dev`만 fast-forward merge |
+| `feature/*`, `fix/*` | 단위 작업 브랜치 | `dev`에서 생성하고 완료 후 `dev`로 merge |
+
+새 작업은 다음처럼 시작합니다.
+
+```bash
+git fetch origin
+git switch dev
+git pull --ff-only origin dev
+git switch -c feature/<short-name>
+
+# 구현 후 로컬 게이트
+make ci
+PYTHONPATH=src uv run --locked python -m ask_seoul_agent.eval_cli deterministic \
+  --manifest evals/cases.v1.json \
+  --output /tmp/ask-seoul-deterministic.json
+```
+
+release는 `dev`의 CI가 통과한 뒤 `main`에 fast-forward로 반영합니다.
+
+```bash
+git switch dev
+git pull --ff-only origin dev
+make ci
+
+git switch main
+git pull --ff-only origin main
+git merge --ff-only dev
+git push origin main
+```
+
+개인 저장소에서도 `main`에는 release 가능한 상태만 남기고, 일반 개발은 `dev` 또는 작업 브랜치에서 진행하는 것을 원칙으로 합니다.
+
 ## 문제와 해결
 
 문제: 일반 챗봇은 “서울 데이터에 대해 그럴듯하게 답하는 것”은 쉽지만, 실제 데이터 상품 상태, freshness, sample-only 한계, upstream 실패를 구분하지 못하면 운영 서비스로 보기 어렵습니다.
@@ -29,20 +69,20 @@ ASK Seoul의 공개 데이터 상품 API를 직접 복사하지 않고, 현재 �
 
 ```mermaid
 flowchart LR
-  U[User / React Console] -->|POST /api/v1/chat/stream| API[FastAPI SSE API]
-  API --> RUN[AgentRunner<br/>max_rounds=4<br/>max_tool_calls=4<br/>total_timeout=45s]
+  U["User / React Console"] -->|"POST /api/v1/chat/stream"| API["FastAPI SSE API"]
+  API --> RUN["AgentRunner; max_rounds=4; max_tool_calls=4; total_timeout=45s"]
   RUN --> P{Provider}
-  P -->|demo, not LLM| DEMO[DemoProvider]
-  P -->|gemini| GEMINI[Gemini GenerateContent API<br/>function-calling adapter]
-  P -->|anthropic| CLAUDE[Anthropic Messages API<br/>tool_use adapter]
-  RUN --> TR[ToolRegistry<br/>allowlisted tools]
-  TR -->|search_products| SEARCH[ASK Seoul REST<br/>/api/v1/catalog<br/>4 weather products only]
-  TR -->|preview_product| PREVIEW[ASK Seoul REST<br/>/api/v1/preview/{product_id}]
-  SEARCH --> CTX[Request-scoped discovered product ids]
+  P -->|"demo, not LLM"| DEMO["DemoProvider"]
+  P -->|"gemini"| GEMINI["Gemini GenerateContent API; function-calling adapter"]
+  P -->|"anthropic"| CLAUDE["Anthropic Messages API; tool_use adapter"]
+  RUN --> TR["ToolRegistry; allowlisted tools"]
+  TR -->|"search_products"| SEARCH["ASK Seoul REST: /api/v1/catalog; 4 weather products only"]
+  TR -->|"preview_product"| PREVIEW["ASK Seoul REST: /api/v1/preview/product_id"]
+  SEARCH --> CTX["Request-scoped discovered product ids"]
   CTX --> PREVIEW
-  PREVIEW --> EV[FinalEnvelope<br/>answer + evidence + trace_id]
+  PREVIEW --> EV["FinalEnvelope; answer + evidence + trace_id"]
   EV --> API
-  API -->|SSE events| U
+  API -->|"SSE events"| U
 ```
 
 ```mermaid
@@ -54,7 +94,7 @@ sequenceDiagram
   participant Tools as ToolRegistry
   participant Ask as ASK Seoul REST
 
-  UI->>API: POST /api/v1/chat/stream {"question": "..."}
+  UI->>API: POST /api/v1/chat/stream (question)
   API->>UI: session.start
   API->>Agent: stream(question, trace_id)
   Agent->>Provider: complete(messages, tool schemas)
@@ -66,7 +106,7 @@ sequenceDiagram
   Agent->>Provider: complete(messages + tool result)
   Provider-->>Agent: tool_call preview_product
   Agent->>Tools: execute(preview_product)
-  Tools->>Ask: GET /api/v1/preview/{product_id}
+  Tools->>Ask: GET /api/v1/preview/product_id
   Ask-->>Tools: up to 5 preview rows
   Agent->>Provider: complete(messages + preview)
   Provider-->>Agent: final text
