@@ -5,7 +5,7 @@ ASK Seoul Agent는 `dev`에서 개발하고 `main`에서 release하는 단일 �
 ## Branch policy
 
 - `dev`: 기능 통합 브랜치입니다. 모든 일반 개발 변경은 이 브랜치에 반영합니다.
-- `main`: release 브랜치입니다. 검증된 `dev`만 fast-forward로 반영합니다.
+- `main`: release 브랜치입니다. 직접 push하지 않고, CI를 통과한 `dev` release PR만 반영합니다.
 - `feature/*`, `fix/*`, `docs/*`: 짧은 단위 작업을 위한 브랜치입니다. 기준 브랜치는 `dev`입니다.
 
 `main`에 직접 작업 커밋을 쌓지 않습니다. GitHub에서는 작업 브랜치 → `dev` pull request, `dev` → `main` release pull request 흐름을 권장합니다.
@@ -37,13 +37,19 @@ PYTHONPATH=src uv run --locked python -m ask_seoul_agent.eval_cli deterministic 
   --output /tmp/ask-seoul-deterministic.json
 ```
 
-그 다음 `main`에 fast-forward로 release합니다.
+그 다음 `dev`에서 `main` release PR을 열고 CI가 통과하면 merge합니다. `main` 보호 규칙은 직접 push를 막고 PR 기록을 남깁니다.
 
 ```bash
-git switch main
+git push origin dev
+gh pr create --base main --head dev --title "release: <summary>" --body "CI와 deterministic eval 통과"
+gh pr checks --watch
+gh pr merge --merge --delete-branch=false
+
+# release 후 dev 동기화
+git switch dev
+git pull --ff-only origin dev
 git pull --ff-only origin main
-git merge --ff-only dev
-git push origin main
+git push origin dev
 ```
 
 배포가 필요하면 release된 `main` 커밋의 Docker image를 빌드합니다.

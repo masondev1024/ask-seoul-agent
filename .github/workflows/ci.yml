@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   backend:
-    name: backend lint type test
+    name: backend lint type test eval
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -36,6 +36,20 @@ jobs:
 
       - name: Test
         run: uv run --locked pytest -m "not live"
+
+      - name: Deterministic release gate
+        run: |
+          PYTHONPATH=src uv run --locked python -m ask_seoul_agent.eval_cli deterministic \
+            --manifest evals/cases.v1.json \
+            --output /tmp/deterministic-eval.json
+
+      - name: Upload deterministic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deterministic-eval-${{ github.sha }}
+          path: /tmp/deterministic-eval.json
+          if-no-files-found: ignore
 
   frontend:
     name: frontend test type build
